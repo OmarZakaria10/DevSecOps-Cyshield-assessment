@@ -1,0 +1,4 @@
+Warning: skipping service 'notifications' due to invalid port: '<missing>'
+Warning: skipping service 'billing-worker' due to invalid weight: '<missing>'
+Warning: skipping service 'metrics-agent' due to invalid port: '70000'
+Summary: processed=7 reported=3 skipped=4
