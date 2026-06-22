@@ -1,0 +1,29 @@
+Vagrant.configure("2") do |config|
+
+  config.vm.box = "generic/ubuntu2204"
+
+  config.vm.define "control-plane" do |node|
+    node.vm.hostname = "control-plane"
+
+    node.vm.network "private_network",
+      ip: "192.168.56.10"
+
+    node.vm.provider :libvirt do |v|
+      v.memory = 1024
+      v.cpus = 1
+    end
+  end
+
+  config.vm.define "worker-1" do |node|
+    node.vm.hostname = "worker-1"
+
+    node.vm.network "private_network",
+      ip: "192.168.56.11"
+
+    node.vm.provider :libvirt do |v|
+      v.memory = 1024
+      v.cpus = 1
+    end
+  end
+
+end
