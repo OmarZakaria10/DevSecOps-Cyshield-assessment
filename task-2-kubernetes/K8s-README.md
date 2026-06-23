@@ -273,6 +273,54 @@ kubectl apply -f podinfo-svc.yaml
 
 ---
 
+## NetworkPolicy (`redis-network-policy.yaml`)
+
+By default, Kubernetes allows all pods in a namespace to talk to each other. The NetworkPolicy below locks Redis down so **only pods labelled `app: podinfo` can reach port 6379** — everything else in the `shop` namespace is denied.
+
+```yaml
+# redis-network-policy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-podinfo
+  namespace: shop
+spec:
+  podSelector:
+    matchLabels:
+      app: redis          # applies to Redis pods
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: podinfo  # allow only podinfo pods
+      ports:
+        - protocol: TCP
+          port: 6379
+```
+
+**How it works:**
+
+- `podSelector` targets pods with `app: redis` — the policy only applies to Redis
+- `policyTypes: [Ingress]` — only ingress traffic is controlled; Redis can still make outbound connections (e.g., DNS)
+- The single `ingress` rule allows TCP/6379 from pods matching `app: podinfo`
+- **No explicit deny rule is needed** — once a NetworkPolicy selects a pod, all ingress not matched by a rule is implicitly dropped
+
+```bash
+kubectl apply -f redis-network-policy.yaml
+```
+
+Verify the policy is in place:
+
+```bash
+kubectl get networkpolicy -n shop
+# NAME                 POD-SELECTOR   AGE
+# redis-allow-podinfo  app=redis      Xs
+```
+
+---
+
 ## Verify
 
 ### 1. podinfo is reachable and ready
@@ -292,3 +340,6 @@ If Redis is unavailable, the cache endpoints return errors — the screenshots b
 ![Redis cache retrieve](images/image-2.png)
 
 podinfo can write to and read from Redis, confirming both the deployment and the service wiring are correct.
+
+#### 3. pod in same cluster cant reach redis due to network policy
+![alt text](images/image-4.png)
