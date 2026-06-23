@@ -319,6 +319,49 @@ kubectl get networkpolicy -n shop
 # redis-allow-podinfo  app=redis      Xs
 ```
 
+## Ingress Controller & Resource
+
+### 1. Install NGINX Ingress Controller (Baremetal)
+
+Since we are running a self-managed baremetal k3s cluster, we deploy the NGINX Ingress Controller using the baremetal manifest. This exposes the controller using a `NodePort` service instead of a cloud-provider `LoadBalancer`:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.7.1/deploy/static/provider/baremetal/deploy.yaml
+```
+
+*(Note: If you run into admission webhook errors when applying resources immediately after installation, wait a few seconds for the controller pod to transition to `Running` and `Ready` so the validation webhook endpoints become active.)*
+
+### 2. The Ingress Resource (`podinfo-ingress.yaml`)
+
+We define an Ingress resource that maps HTTP traffic on the root path `/` to the `podinfo` Service on port `80`:
+
+```yaml
+# podinfo-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: podinfo
+  namespace: shop
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: podinfo
+                port:
+                  number: 80
+```
+
+Apply it using:
+
+```bash
+kubectl apply -f kubernetes/podinfo-ingress.yaml
+```
+
 ---
 
 ## Verify
@@ -341,5 +384,26 @@ If Redis is unavailable, the cache endpoints return errors — the screenshots b
 
 podinfo can write to and read from Redis, confirming both the deployment and the service wiring are correct.
 
-#### 3. pod in same cluster cant reach redis due to network policy
+### 2. Network Policy isolation
+
+Other pods in the cluster cannot connect to Redis on port 6379 unless they have the label `app: podinfo`.
+
 ![alt text](images/image-4.png)
+
+### 3. Ingress Routing & Frontend Reachability
+
+Verify that the Ingress controller correctly routes external requests to the `podinfo` service.
+
+First, get the assigned NodePort of the `ingress-nginx-controller` service:
+
+```bash
+kubectl get svc -n ingress-nginx ingress-nginx-controller
+```
+
+Then, query the `/readyz` endpoint of `podinfo` using the VM Node IP and the mapped HTTP NodePort:
+
+```bash
+curl http://<NODE_IP>:<NODE_PORT>/readyz
+```
+
+![alt text](images/image-5.png)
