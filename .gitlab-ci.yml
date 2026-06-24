@@ -1,6 +1,6 @@
 # =============================================================================
 #  GitLab CI/CD Pipeline
-#  Stages: Test (Docker Compose) -> Lint & SAST -> Containerize -> Scan (Trivy)
+#  Stages: Test -> Lint & SAST -> Containerize -> Scan (Trivy) -> Push
 # =============================================================================
 
 stages:
@@ -8,6 +8,7 @@ stages:
   - lint
   - containerize
   - scan
+  - push
 
 variables:
   # ---- Docker Daemon Config (for DinD) ----
@@ -120,3 +121,32 @@ scan_image:
     paths:
       - trivy-report.txt
     expire_in: 7 days
+
+# ---------------------------------------------------------------------------
+# Stage 5: Conditional Push to GitLab Container Registry
+# ---------------------------------------------------------------------------
+push_image:
+  stage: push
+  image: docker:26
+  services:
+    - name: docker:26-dind
+      alias: docker
+  before_script:
+    # Log in to the GitLab Container Registry using pre-defined GitLab variables
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - echo "Loading the verified Docker image from tarball..."
+    - docker load < app-image.tar.gz
+    - echo "Pushing Docker image to the registry..."
+    - docker push "$IMAGE_TAG"
+    # Also push a 'latest' tag for main branch tracking
+    - docker tag "$IMAGE_TAG" "$CI_REGISTRY_IMAGE:latest"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+  needs:
+    - job: scan_image
+      artifacts: false
+    - job: containerize_image
+      artifacts: true
+  rules:
+    # Only push verified images from the main branch
+    - if: '$CI_COMMIT_BRANCH == "main"'
