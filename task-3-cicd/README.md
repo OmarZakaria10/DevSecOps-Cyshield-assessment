@@ -131,9 +131,18 @@ HTTP 400 Bad Request: 'title' is required and must not be blank
 
 ---
 
+## 🧪 GitLab CI/CD Verification Result
+
+The GitLab CI/CD pipeline (`.gitlab-ci.yml`) was successfully run to test the jobs and verify the connectivity between the Flask app and the PostgreSQL database using docker compose. The execution succeeded.
+
+Verification:
+![GitLab CI/CD Pipeline Success](images/image.png)
+
+---
+
 ## 🛡️ CI/CD Pipeline Files & Docs
 
 The delivery configurations are fully defined in the following files:
-* **`.gitlab-ci.yml`**: Defines the 7 stages (Build, Test, Lint & SAST, Containerize, Image Scan, Push, Deploy).
+* **`.gitlab-ci.yml`**: Defines the stages and configuration for running Docker Compose & Curl tests inside DinD.
 * **`Dockerfile`**: Minimalist multi-stage production image with rootless user configurations.
 * **`PIPELINE.md`**: In-depth DevSecOps documentation explaining the security thresholds, caching strategies, and environment setup.
