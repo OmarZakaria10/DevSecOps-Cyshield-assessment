@@ -115,6 +115,7 @@ pytest_tests:
         sleep 1
       done
     - source venv/bin/activate
+    - export PYTHONPATH=$PWD
     - mkdir -p reports
   script:
     - |
