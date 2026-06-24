@@ -17,9 +17,9 @@ variables:
   DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
   
   # ---- Security Configurations ----
-  BANDIT_SEVERITY: "HIGH" # Fail on: LOW | MEDIUM | HIGH
-  TRIVY_SEVERITY: "CRITICAL,HIGH" # Severity threshold for Trivy
-  TRIVY_EXIT_CODE: "1" # 1 = fail pipeline if CVEs found, 0 = log only
+  BANDIT_SEVERITY: "HIGH"
+  TRIVY_SEVERITY: "CRITICAL,HIGH"
+  TRIVY_EXIT_CODE: "1"
   IMAGE_TAG: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
 
 # ---------------------------------------------------------------------------
@@ -37,7 +37,6 @@ test_compose:
   script:
     - echo "Starting database and application services..."
     - docker compose up --build -d
-    
     - echo "Waiting for health check (http://docker:5000/health)..."
     - |
       for i in $(seq 1 30); do
@@ -48,8 +47,6 @@ test_compose:
         echo "  waiting... (attempt $i/30)"
         sleep 1
       done
-
-    # Run verification tests
     - curl -s -f http://docker:5000/health | grep -q "ok"
     - curl -s -X POST http://docker:5000/api/tasks -H "Content-Type: application/json" -d '{"title":"GitLab CI Pipeline Test"}'
     - curl -s http://docker:5000/api/tasks
@@ -69,10 +66,8 @@ lint_and_sast:
   script:
     - echo "Running flake8 (style checker)..."
     - flake8 app/ wsgi.py
-    
     - echo "Running bandit (SAST security checker)..."
     - bandit -r app/ -ll --severity-level "$BANDIT_SEVERITY"
-    
     - echo "Running pip-audit (dependency CVE checker)..."
     - pip-audit --requirement requirements.txt
 
