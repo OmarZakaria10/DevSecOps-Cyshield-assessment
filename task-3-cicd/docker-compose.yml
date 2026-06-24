@@ -1,0 +1,57 @@
+# =============================================================================
+#  docker-compose.yml — Local development & testing
+#  Usage:  docker compose up --build
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL database
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: taskapi_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: taskdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localpassword   # local-only, never used in CI/CD
+    ports:
+      - "5433:5432"          # expose so you can connect with psql / DBeaver on port 5433
+    volumes:
+      - pgdata:/var/lib/postgresql/data  # persist data between restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Flask application (built from local Dockerfile)
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskapi_app
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: taskdb
+      DB_USER: postgres
+      DB_PASSWORD: localpassword
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy   # wait for postgres to be ready
+    # Uses the CMD from the Dockerfile (gunicorn).
+    # Uncomment the line below to switch to Flask dev server with auto-reload:
+    # command: python wsgi.py
+
+# ---------------------------------------------------------------------------
+# Named volume for PostgreSQL data
+# ---------------------------------------------------------------------------
+volumes:
+  pgdata:
