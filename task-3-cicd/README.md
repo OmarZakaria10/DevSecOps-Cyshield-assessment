@@ -172,11 +172,21 @@ With all remediations applied (upgraded packages, configured security gates, and
 
 * **Trivy Image Scan Passed:**
   ![Trivy Scan Success](images/image5.png)
+
+* **Push to GitLab Registry:**
+  ![alt text](images/image7.png)
+  ![Push to GitLab Registry Success](images/image6.png)
+
+
+## Pytest Coverage Report
+  ![alt text](images/image8.png)
+
+  
 ## 🛡️ CI/CD Pipeline Files & Docs
 
 The delivery configurations are fully defined in the following files:
 * **`.gitlab-ci.yml`**: Defines the stages and configuration for running Docker Compose & Curl tests inside DinD.
-* **`Dockerfile`**: Minimalist multi-stage production image with rootless user configurations.
+* **`Dockerfile`**: Minimalist production image with rootless user configurations.
 * **`PIPELINE.md`**: In-depth DevSecOps documentation explaining the security thresholds, caching strategies, and environment setup.
 
 

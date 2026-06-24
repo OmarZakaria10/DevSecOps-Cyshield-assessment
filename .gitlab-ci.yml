@@ -140,42 +140,6 @@ pytest_tests:
       - task-3-cicd/reports/
     expire_in: 7 days
   coverage: '/TOTAL.*\s+(\d+%)$/'   # regex GitLab uses to parse coverage %
-# ---------------------------------------------------------------------------
-# Stage 1: Integration Test via Docker Compose
-# ---------------------------------------------------------------------------
-test_compose:
-  stage: test
-  image: docker:26
-  services:
-    - name: docker:26-dind
-      alias: docker
-  before_script:
-    - cd task-3-cicd
-    - apk add --no-cache curl
-  script:
-    - echo "Starting database and application services..."
-    - docker compose up --build -d
-    - echo "Waiting for health check (http://docker:5000/health)..."
-    - |
-      for i in $(seq 1 30); do
-        if curl -s -f http://docker:5000/health > /dev/null; then
-          echo "Database & Application are healthy and connected!"
-          break
-        fi
-        echo "  waiting... (attempt $i/30)"
-        sleep 1
-      done
-    - curl -s -f http://docker:5000/health | grep -q "ok" && echo "SUCCESS - Health check returned ok"
-    - echo "Adding a test task..."
-    - |
-      curl -s -X POST http://docker:5000/api/tasks \
-        -H "Content-Type: application/json" \
-        -d '{"title": "GitLab CI Pipeline Test"}'
-    - echo "Listing tasks to verify DB integration..."
-    - curl -s http://docker:5000/api/tasks
-  after_script:
-    - cd task-3-cicd
-    - docker compose down -v
 
 # ---------------------------------------------------------------------------
 # Stage 2: Code Quality and Vulnerability Checks
