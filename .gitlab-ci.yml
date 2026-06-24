@@ -1,0 +1,62 @@
+# =============================================================================
+#  GitLab CI/CD Pipeline — Docker Compose Integration & Curl Health Check
+# =============================================================================
+
+stages:
+  - test-compose
+
+# ---------------------------------------------------------------------------
+# Test job that builds and starts the app via docker compose, then curls it
+# ---------------------------------------------------------------------------
+test_local_compose:
+  stage: test-compose
+  image: docker:26
+  services:
+    - name: docker:26-dind
+      alias: docker
+  variables:
+    # Use TLS for communication with the Docker-in-Docker daemon
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+  before_script:
+    - cd task-3-cicd
+    # Install curl inside the runner container to make the HTTP request
+    - apk add --no-cache curl
+  script:
+    - echo "Building and starting services via Docker Compose..."
+    - docker compose up --build -d
+    
+    - echo "Waiting for application to boot and database healthcheck to pass..."
+    # Poll the health endpoint (max 30 seconds) until it returns HTTP 200.
+    # Note: Since Docker daemon runs on the 'docker' service hostname in GitLab CI,
+    # we target http://docker:5000/health instead of localhost.
+    - |
+      for i in $(seq 1 30); do
+        if curl -s -f http://docker:5000/health > /dev/null; then
+          echo "Application is healthy!"
+          break
+        fi
+        echo "  waiting... (attempt $i/30)"
+        sleep 1
+      done
+
+    - echo "Performing verification curl test..."
+    # Make a request to the health check and print the result
+    - curl -s -f http://docker:5000/health | grep -q "ok" && echo "SUCCESS - Health check returned ok" || (echo "FAILED - Health check failed" && exit 1)
+    
+    # Optional: Make a POST request to add a task and read it back
+    - echo "Adding a test task..."
+    - |
+      curl -s -X POST http://docker:5000/api/tasks \
+        -H "Content-Type: application/json" \
+        -d '{"title": "GitLab CI test task"}'
+    
+    - echo "Listing tasks to verify DB integration..."
+    - curl -s http://docker:5000/api/tasks
+
+  after_script:
+    - cd task-3-cicd
+    - echo "Stopping containers and cleaning up volumes..."
+    - docker compose down -v
