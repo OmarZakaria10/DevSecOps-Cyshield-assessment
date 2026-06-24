@@ -158,6 +158,20 @@ To resolve this and ensure the pipeline remains actionable, the following fixes 
 1. Updated the [Dockerfile](file:///media/omar/01DADC72FB780420/Projects/DevSecOps-Cyshield-assessment/task-3-cicd/Dockerfile) to run an OS upgrade (`apt-get update && apt-get upgrade -y`) to apply all available system security patches.
 2. Configured the Trivy scanner to use the `--ignore-unfixed` flag to prevent blocking builds on upstream vendor issues that have no available security patch.
 
+## 🎉 Final Pipeline Success & Artifact Generation (Fourth Run)
+
+With all remediations applied (upgraded packages, configured security gates, and resolved database bindings), the GitLab CI/CD pipeline runs and passes successfully. Additionally, security reports are now generated and stored as artifacts for both code and container image checks.
+
+**Verification Screenshots:**
+
+* **Pipeline Run Successful:**
+  ![GitLab Pipeline Success](images/image3.png)
+
+* **Generated Security Scan Artifacts:**
+  ![Code Security Artifacts](images/image4.png)
+
+* **Trivy Image Scan Passed:**
+  ![Trivy Scan Success](images/image5.png)
 ## 🛡️ CI/CD Pipeline Files & Docs
 
 The delivery configurations are fully defined in the following files:
