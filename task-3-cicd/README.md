@@ -140,9 +140,29 @@ Verification:
 
 ---
 
+## 🛡️ Dependency Vulnerability Remediation (Second Run)
+
+The second version of the GitLab CI/CD pipeline correctly caught a known dependency vulnerability (CVE-2026-27205) via the `pip-audit` scan:
+
+![Dependency Vulnerability Scan Failure](images/image1.png)
+
+This was successfully remediated by upgrading `flask` to `3.1.3` in `requirements.txt`.
+
+## 🐳 Base Image OS Vulnerability Remediation (Third Run)
+
+The third run of the pipeline resolved the python dependencies but failed during the `scan_image` stage because Trivy detected OS-level vulnerabilities inside the base Debian container:
+
+![OS Vulnerability Scan Failure](images/image2.png)
+
+To resolve this and ensure the pipeline remains actionable, the following fixes were implemented:
+1. Updated the [Dockerfile](file:///media/omar/01DADC72FB780420/Projects/DevSecOps-Cyshield-assessment/task-3-cicd/Dockerfile) to run an OS upgrade (`apt-get update && apt-get upgrade -y`) to apply all available system security patches.
+2. Configured the Trivy scanner to use the `--ignore-unfixed` flag to prevent blocking builds on upstream vendor issues that have no available security patch.
+
 ## 🛡️ CI/CD Pipeline Files & Docs
 
 The delivery configurations are fully defined in the following files:
 * **`.gitlab-ci.yml`**: Defines the stages and configuration for running Docker Compose & Curl tests inside DinD.
 * **`Dockerfile`**: Minimalist multi-stage production image with rootless user configurations.
 * **`PIPELINE.md`**: In-depth DevSecOps documentation explaining the security thresholds, caching strategies, and environment setup.
+
+

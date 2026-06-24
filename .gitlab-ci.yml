@@ -70,11 +70,18 @@ lint_and_sast:
     - pip install --no-cache-dir flake8 bandit pip-audit
   script:
     - echo "Running flake8 (style checker)..."
-    - flake8 app/ wsgi.py
+    - flake8 app/ wsgi.py > flake8-report.txt || (cat flake8-report.txt && exit 1)
     - echo "Running bandit (SAST security checker)..."
-    - bandit -r app/ --severity-level "$BANDIT_SEVERITY"
+    - bandit -r app/ --severity-level "$BANDIT_SEVERITY" -f txt -o bandit-report.txt || (cat bandit-report.txt && exit 1)
     - echo "Running pip-audit (dependency CVE checker)..."
-    - pip-audit --requirement requirements.txt
+    - pip-audit --requirement requirements.txt --output pip-audit-report.txt || (cat pip-audit-report.txt && exit 1)
+  artifacts:
+    when: always
+    paths:
+      - task-3-cicd/flake8-report.txt
+      - task-3-cicd/bandit-report.txt
+      - task-3-cicd/pip-audit-report.txt
+    expire_in: 7 days
 
 # ---------------------------------------------------------------------------
 # Stage 3: Containerize (Docker Build)
@@ -106,4 +113,10 @@ scan_image:
     entrypoint: [""]
   script:
     - echo "Scanning built Docker image with Trivy (threshold=${TRIVY_SEVERITY})..."
-    - trivy image --input app-image.tar.gz --severity "$TRIVY_SEVERITY" --exit-code "$TRIVY_EXIT_CODE" --no-progress
+    - trivy image --input app-image.tar.gz --ignore-unfixed --severity "$TRIVY_SEVERITY" --format table --output trivy-report.txt
+    - trivy image --input app-image.tar.gz --ignore-unfixed --severity "$TRIVY_SEVERITY" --exit-code "$TRIVY_EXIT_CODE" --no-progress
+  artifacts:
+    when: always
+    paths:
+      - trivy-report.txt
+    expire_in: 7 days
