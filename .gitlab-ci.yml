@@ -47,8 +47,13 @@ test_compose:
         echo "  waiting... (attempt $i/30)"
         sleep 1
       done
-    - curl -s -f http://docker:5000/health | grep -q "ok"
-    - curl -s -X POST http://docker:5000/api/tasks -H "Content-Type: application/json" -d '{"title":"GitLab CI Pipeline Test"}'
+    - curl -s -f http://docker:5000/health | grep -q "ok" && echo "SUCCESS - Health check returned ok"
+    - echo "Adding a test task..."
+    - |
+      curl -s -X POST http://docker:5000/api/tasks \
+        -H "Content-Type: application/json" \
+        -d '{"title": "GitLab CI Pipeline Test"}'
+    - echo "Listing tasks to verify DB integration..."
     - curl -s http://docker:5000/api/tasks
   after_script:
     - cd task-3-cicd
