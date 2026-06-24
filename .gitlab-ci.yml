@@ -1,62 +1,109 @@
 # =============================================================================
-#  GitLab CI/CD Pipeline — Docker Compose Integration & Curl Health Check
+#  GitLab CI/CD Pipeline
+#  Stages: Test (Docker Compose) -> Lint & SAST -> Containerize -> Scan (Trivy)
 # =============================================================================
 
 stages:
-  - test-compose
+  - test
+  - lint
+  - containerize
+  - scan
+
+variables:
+  # ---- Docker Daemon Config (for DinD) ----
+  DOCKER_HOST: tcp://docker:2376
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_TLS_VERIFY: "1"
+  DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+  
+  # ---- Security Configurations ----
+  BANDIT_SEVERITY: "HIGH" # Fail on: LOW | MEDIUM | HIGH
+  TRIVY_SEVERITY: "CRITICAL,HIGH" # Severity threshold for Trivy
+  TRIVY_EXIT_CODE: "1" # 1 = fail pipeline if CVEs found, 0 = log only
+  IMAGE_TAG: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
 
 # ---------------------------------------------------------------------------
-# Test job that builds and starts the app via docker compose, then curls it
+# Stage 1: Integration Test via Docker Compose
 # ---------------------------------------------------------------------------
-test_local_compose:
-  stage: test-compose
+test_compose:
+  stage: test
   image: docker:26
   services:
     - name: docker:26-dind
       alias: docker
-  variables:
-    # Use TLS for communication with the Docker-in-Docker daemon
-    DOCKER_HOST: tcp://docker:2376
-    DOCKER_TLS_CERTDIR: "/certs"
-    DOCKER_TLS_VERIFY: "1"
-    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
   before_script:
     - cd task-3-cicd
-    # Install curl inside the runner container to make the HTTP request
     - apk add --no-cache curl
   script:
-    - echo "Building and starting services via Docker Compose..."
+    - echo "Starting database and application services..."
     - docker compose up --build -d
     
-    - echo "Waiting for application to boot and database healthcheck to pass..."
-    # Poll the health endpoint (max 30 seconds) until it returns HTTP 200.
-    # Note: Since Docker daemon runs on the 'docker' service hostname in GitLab CI,
-    # we target http://docker:5000/health instead of localhost.
+    - echo "Waiting for health check (http://docker:5000/health)..."
     - |
       for i in $(seq 1 30); do
         if curl -s -f http://docker:5000/health > /dev/null; then
-          echo "Application is healthy!"
+          echo "Database & Application are healthy and connected!"
           break
         fi
         echo "  waiting... (attempt $i/30)"
         sleep 1
       done
 
-    - echo "Performing verification curl test..."
-    # Make a request to the health check and print the result
-    - curl -s -f http://docker:5000/health | grep -q "ok" && echo "SUCCESS - Health check returned ok" || (echo "FAILED - Health check failed" && exit 1)
-    
-    # Optional: Make a POST request to add a task and read it back
-    - echo "Adding a test task..."
-    - |
-      curl -s -X POST http://docker:5000/api/tasks \
-        -H "Content-Type: application/json" \
-        -d '{"title": "GitLab CI test task"}'
-    
-    - echo "Listing tasks to verify DB integration..."
+    # Run verification tests
+    - curl -s -f http://docker:5000/health | grep -q "ok"
+    - curl -s -X POST http://docker:5000/api/tasks -H "Content-Type: application/json" -d '{"title":"GitLab CI Pipeline Test"}'
     - curl -s http://docker:5000/api/tasks
-
   after_script:
     - cd task-3-cicd
-    - echo "Stopping containers and cleaning up volumes..."
     - docker compose down -v
+
+# ---------------------------------------------------------------------------
+# Stage 2: Code Quality and Vulnerability Checks
+# ---------------------------------------------------------------------------
+lint_and_sast:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - cd task-3-cicd
+    - pip install --no-cache-dir flake8 bandit pip-audit
+  script:
+    - echo "Running flake8 (style checker)..."
+    - flake8 app/ wsgi.py
+    
+    - echo "Running bandit (SAST security checker)..."
+    - bandit -r app/ -ll --severity-level "$BANDIT_SEVERITY"
+    
+    - echo "Running pip-audit (dependency CVE checker)..."
+    - pip-audit --requirement requirements.txt
+
+# ---------------------------------------------------------------------------
+# Stage 3: Containerize (Docker Build)
+# ---------------------------------------------------------------------------
+containerize_image:
+  stage: containerize
+  image: docker:26
+  services:
+    - name: docker:26-dind
+      alias: docker
+  script:
+    - cd task-3-cicd
+    - echo "Building production Docker image..."
+    - docker build -t "$IMAGE_TAG" .
+    - echo "Saving built image to tarball for security scanning..."
+    - docker save "$IMAGE_TAG" | gzip > ../app-image.tar.gz
+  artifacts:
+    paths:
+      - app-image.tar.gz
+    expire_in: 1 day
+
+# ---------------------------------------------------------------------------
+# Stage 4: Image Vulnerability Scanning (Trivy)
+# ---------------------------------------------------------------------------
+scan_image:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - echo "Scanning built Docker image with Trivy (threshold=${TRIVY_SEVERITY})..."
+    - trivy image --input app-image.tar.gz --severity "$TRIVY_SEVERITY" --exit-code "$TRIVY_EXIT_CODE" --no-progress
