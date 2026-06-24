@@ -345,7 +345,8 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - http:
+    - host: podinfo.local
+      http:
         paths:
           - path: /
             pathType: Prefix
@@ -400,10 +401,36 @@ First, get the assigned NodePort of the `ingress-nginx-controller` service:
 kubectl get svc -n ingress-nginx ingress-nginx-controller
 ```
 
-Then, query the `/readyz` endpoint of `podinfo` using the VM Node IP and the mapped HTTP NodePort:
+Then, query the `/readyz` endpoint of `podinfo` using the VM Node IP, the mapped HTTP NodePort, and the `podinfo.local` Host header:
 
 ```bash
-curl http://<NODE_IP>:<NODE_PORT>/readyz
+curl -H "Host: podinfo.local" http://<NODE_IP>:<NODE_PORT>/readyz
 ```
 
 ![alt text](images/image-5.png)
+
+after adding `host: podinfo.local` to the ingress resource, the frontend is reachable via the FQDN `podinfo.local`.
+
+To access the frontend from a web browser on your local machine:
+
+1. **Map the domain in your local `/etc/hosts` file:**
+   Open `/etc/hosts` with root privileges (e.g., `sudo nano /etc/hosts`) and add an entry pointing your VM's Node IP to `podinfo.local`. For example:
+   ```hosts
+   192.168.121.6 podinfo.local
+   ```
+   *(Note: You can use any of your cluster node IPs, e.g., `192.168.121.6` or `192.168.121.224`)*
+
+2. **Retrieve the NGINX HTTP NodePort:**
+   ```bash
+   kubectl get svc -n ingress-nginx ingress-nginx-controller
+   ```
+   Look for the mapped HTTP port (e.g., `80:32396/TCP`). Here, the NodePort is `32396`.
+
+3. **Navigate in your browser:**
+   Open your web browser and go to:
+   ```
+   http://podinfo.local:<NODE_PORT>/
+   ```
+   (For example: `http://podinfo.local:32396/`)
+
+   ![alt text](images/image-6.png)
