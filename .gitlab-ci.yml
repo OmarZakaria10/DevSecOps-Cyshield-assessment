@@ -1,0 +1,266 @@
+# =============================================================================
+#  GitLab CI/CD Pipeline
+#  Stages: Test -> Lint & SAST -> Containerize -> Scan (Trivy) -> Push
+# =============================================================================
+
+stages:
+  - install
+  - test
+  - lint
+  - containerize
+  - scan
+  - push
+  - deploy
+
+variables:
+  # ---- Docker Daemon Config (for DinD) ----
+  DOCKER_HOST: tcp://docker:2376
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_TLS_VERIFY: "1"
+  DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+  
+  # ---- Security Configurations ----
+  BANDIT_SEVERITY: "high"
+  TRIVY_SEVERITY: "CRITICAL,HIGH"
+  TRIVY_EXIT_CODE: "1"
+  IMAGE_TAG: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+
+  # ---- Python / pip cache path (shared across stages via cache key) ----
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+  # ---- App working directory inside the repo ----
+  APP_DIR: "task-3-cicd"
+
+# =============================================================================
+#  Re-usable cache definition (YAML anchor)
+#  Keyed on the branch so different branches don't share broken caches.
+#  The requirements files are added to the key so any dependency change
+#  busts the cache automatically.
+# =============================================================================
+.pip_cache: &pip_cache
+  cache:
+    key:
+      files:
+        - task-3-cicd/requirements.txt
+        - task-3-cicd/requirements-dev.txt
+      prefix: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - .cache/pip
+      - task-3-cicd/venv/
+    policy: pull          # jobs that use this anchor only pull by default
+
+# =============================================================================
+#  Stage 1 — Install & Cache Dependencies
+#  Builds the virtual-env once and pushes it into the cache so every
+#  downstream Python job can pull it without hitting PyPI again.
+# =============================================================================
+install_deps:
+  stage: install
+  image: python:3.12-slim
+  <<: *pip_cache
+  cache:                          # override to PUSH the cache from this job
+    key:
+      files:
+        - task-3-cicd/requirements.txt
+        - task-3-cicd/requirements-dev.txt
+      prefix: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - .cache/pip
+      - task-3-cicd/venv/
+    policy: push
+  script:
+    - cd "$APP_DIR"
+    - python -m venv venv
+    - venv/bin/pip install --upgrade pip
+    - venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+  # Expose the venv as an artifact so jobs that can't use the cache
+  # (e.g. DinD-based jobs) still receive the installed packages via
+  # artifacts if needed — but Python stages below simply pull the cache.
+  artifacts:
+    paths:
+      - task-3-cicd/venv/
+    expire_in: 1 day
+
+# =============================================================================
+#  Stage 2a — Unit & Integration Tests (pytest + PostgreSQL service)
+#  Runs the full test suite against a real PostgreSQL container.
+#  Publishes a JUnit XML report so results appear in the GitLab UI under
+#  the pipeline's "Tests" tab.
+#  Falls back to SQLite automatically when DATABASE_URL is not set
+#  (see conftest.py), but we always provide the real URL here in CI.
+# =============================================================================
+pytest_tests:
+  stage: test
+  image: python:3.12-slim
+  <<: *pip_cache
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+      variables:
+        POSTGRES_DB: taskdb_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: testpassword
+  variables:
+    # Passed to conftest.py via os.getenv("DATABASE_URL")
+    DATABASE_URL: "postgresql://postgres:testpassword@postgres:5432/taskdb_test"
+  before_script:
+    - cd "$APP_DIR"
+    # Install psql client to wait for the DB to be ready
+    - apt-get update -qq && apt-get install -y -qq postgresql-client
+    - |
+      echo "Waiting for PostgreSQL to accept connections..."
+      for i in $(seq 1 30); do
+        pg_isready -h postgres -U postgres && break
+        echo "  attempt $i/30 — sleeping 1s"
+        sleep 1
+      done
+    - source venv/bin/activate
+    - export PYTHONPATH=$PWD
+    - mkdir -p reports
+  script:
+    - |
+      pytest tests/ \
+        --tb=short \
+        -v \
+        --junitxml=reports/junit.xml \
+        --cov=app \
+        --cov-report=term-missing \
+        --cov-report=xml:reports/coverage.xml
+  after_script:
+    - cd "$APP_DIR"
+  artifacts:
+    when: always
+    reports:
+      # Surfaces pass/fail counts and individual test names in the GitLab UI
+      junit: task-3-cicd/reports/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: task-3-cicd/reports/coverage.xml
+    paths:
+      - task-3-cicd/reports/
+    expire_in: 7 days
+  coverage: '/TOTAL.*\s+(\d+%)$/'   # regex GitLab uses to parse coverage %
+
+# ---------------------------------------------------------------------------
+# Stage 2: Code Quality and Vulnerability Checks
+# ---------------------------------------------------------------------------
+lint_and_sast:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - cd task-3-cicd
+    - pip install --no-cache-dir flake8 bandit pip-audit
+  script:
+    - echo "Running flake8 (style checker)..."
+    - flake8 app/ wsgi.py > flake8-report.txt || (cat flake8-report.txt && exit 1)
+    - echo "Running bandit (SAST security checker)..."
+    - bandit -r app/ --severity-level "$BANDIT_SEVERITY" -f txt -o bandit-report.txt || (cat bandit-report.txt && exit 1)
+    - echo "Running pip-audit (dependency CVE checker)..."
+    - pip-audit --requirement requirements.txt --output pip-audit-report.txt || (cat pip-audit-report.txt && exit 1)
+  artifacts:
+    when: always
+    paths:
+      - task-3-cicd/flake8-report.txt
+      - task-3-cicd/bandit-report.txt
+      - task-3-cicd/pip-audit-report.txt
+    expire_in: 7 days
+
+# ---------------------------------------------------------------------------
+# Stage 3: Containerize (Docker Build)
+# ---------------------------------------------------------------------------
+containerize_image:
+  stage: containerize
+  image: docker:26
+  services:
+    - name: docker:26-dind
+      alias: docker
+  script:
+    - cd task-3-cicd
+    - echo "Building production Docker image..."
+    - docker build -t "$IMAGE_TAG" .
+    - echo "Saving built image to tarball for security scanning..."
+    - docker save "$IMAGE_TAG" | gzip > ../app-image.tar.gz
+  artifacts:
+    paths:
+      - app-image.tar.gz
+    expire_in: 1 day
+
+# ---------------------------------------------------------------------------
+# Stage 4: Image Vulnerability Scanning (Trivy)
+# ---------------------------------------------------------------------------
+scan_image:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - echo "Scanning built Docker image with Trivy (threshold=${TRIVY_SEVERITY})..."
+    - trivy image --input app-image.tar.gz --ignore-unfixed --severity "$TRIVY_SEVERITY" --format table --output trivy-report.txt
+    - trivy image --input app-image.tar.gz --ignore-unfixed --severity "$TRIVY_SEVERITY" --exit-code "$TRIVY_EXIT_CODE" --no-progress
+  artifacts:
+    when: always
+    paths:
+      - trivy-report.txt
+    expire_in: 7 days
+
+# ---------------------------------------------------------------------------
+# Stage 5: Conditional Push to GitLab Container Registry
+# ---------------------------------------------------------------------------
+push_image:
+  stage: push
+  image: docker:26
+  services:
+    - name: docker:26-dind
+      alias: docker
+  before_script:
+    # Log in to the GitLab Container Registry using pre-defined GitLab variables
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - echo "Loading the verified Docker image from tarball..."
+    - docker load < app-image.tar.gz
+    - echo "Pushing Docker image to the registry..."
+    - docker push "$IMAGE_TAG"
+    # Also push a 'latest' tag for main branch tracking
+    - docker tag "$IMAGE_TAG" "$CI_REGISTRY_IMAGE:latest"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+  needs:
+    - job: scan_image
+      artifacts: false
+    - job: containerize_image
+      artifacts: true
+  rules:
+    # Only push verified images from the main branch
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# =============================================================================
+#  Stage 7 — Deploy to Staging (Manual Gate)
+#  Simulates a kubectl rollout 
+#
+#  Required CI/CD variable (GitLab → Settings → CI/CD → Variables):
+#    KUBECONFIG_STAGING  — kubeconfig file contents (File type variable)
+# =============================================================================
+
+# deploy_staging:
+#   stage: deploy
+#   image: bitnami/kubectl:latest
+#   environment:
+#     name: staging
+#     url: https://staging.taskapi.example.com
+#   rules:
+#     - if: '$CI_COMMIT_BRANCH == "main"'
+#       when: manual
+#   needs:
+#     - job: push_image
+#       artifacts: false
+#   script:
+#     - echo "Deploying $IMAGE_TAG to staging namespace..."
+#     - |
+#       if [ -n "$KUBECONFIG_STAGING" ]; then
+#         export KUBECONFIG="$KUBECONFIG_STAGING"
+#         kubectl set image deployment/taskapi taskapi="$IMAGE_TAG" --namespace=staging
+#         kubectl rollout status deployment/taskapi --namespace=staging --timeout=120s
+#       else
+#         echo "[SIMULATED] kubectl set image deployment/taskapi taskapi=$IMAGE_TAG --namespace=staging"
+#         echo "[SIMULATED] kubectl rollout status deployment/taskapi --namespace=staging --timeout=120s"
+#         echo "Deploy simulation complete — set KUBECONFIG_STAGING to deploy for real."
+#       fi
