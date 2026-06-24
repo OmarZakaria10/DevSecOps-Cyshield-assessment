@@ -72,7 +72,7 @@ lint_and_sast:
     - echo "Running flake8 (style checker)..."
     - flake8 app/ wsgi.py
     - echo "Running bandit (SAST security checker)..."
-    - bandit -r app/ -ll --severity-level "$BANDIT_SEVERITY"
+    - bandit -r app/ --severity-level "$BANDIT_SEVERITY"
     - echo "Running pip-audit (dependency CVE checker)..."
     - pip-audit --requirement requirements.txt
 
