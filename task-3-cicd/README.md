@@ -181,6 +181,36 @@ With all remediations applied (upgraded packages, configured security gates, and
 ## Pytest Coverage Report
   ![alt text](images/image8.png)
 
+## Staging Environment Deployment
+  ```yaml
+deploy_staging:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  environment:
+    name: staging
+    url: https://staging.taskapi.example.com
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  needs:
+    - job: push_image
+      artifacts: false
+  script:
+    - echo "Deploying $IMAGE_TAG to staging namespace..."
+    - |
+      if [ -n "$KUBECONFIG_STAGING" ]; then
+        export KUBECONFIG="$KUBECONFIG_STAGING"
+        kubectl set image deployment/taskapi taskapi="$IMAGE_TAG" --namespace=staging
+        kubectl rollout status deployment/taskapi --namespace=staging --timeout=120s
+      else
+        echo "[SIMULATED] kubectl set image deployment/taskapi taskapi=$IMAGE_TAG --namespace=staging"
+        echo "[SIMULATED] kubectl rollout status deployment/taskapi --namespace=staging --timeout=120s"
+        echo "Deploy simulation complete — set KUBECONFIG_STAGING to deploy for real."
+      fi
+  ```
+
+  no time to create k8s cluster but i made this task using ArgoCD in a personal project using Jenkins https://github.com/OmarZakaria10/PricePointScout/blob/main/Jenkinsfile
+
   
 ## 🛡️ CI/CD Pipeline Files & Docs
 
